@@ -36,6 +36,7 @@ Tried to classify web pages. Specifically, target function was the home page of 
 - Naive Bayes classifiers were trained separately for x_1 and x_2
 
 **Co-training algorithm**
+
 Given
 - a set L of labeled training examples
 - a set U of unlabeled examples
