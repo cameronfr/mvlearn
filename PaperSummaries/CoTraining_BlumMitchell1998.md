@@ -54,5 +54,6 @@ Loop for k iterations:
 *Note:* The paper experiments use naive Bayes classifiers for both h's, p=1, n=3, k=30, u=75, size(U) = 1051, size(L) = 12
 
 ***Final Combined Classifier***
+
 Since naive Bayes classifiers were used, which output probabilities P(c_j|x_1) of class c_j given the instance x_1, and P(c_j|x_2) of class c_j given the instance x_2, the combined classifier uses the conditional independence assumption, and outputs P(c_j|x) of class c_j given the instance x = (x1,2) as *P(c_j|x) = P(c_j|x_1)P(c_j|x_2)* 
 
