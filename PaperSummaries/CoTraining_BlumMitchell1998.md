@@ -40,7 +40,9 @@ Tried to classify web pages. Specifically, target function was the home page of 
 Given
 - a set L of labeled training examples
 - a set U of unlabeled examples
+
 Create a pool U' of examples by choosing u examples at random from U
+
 Loop for k iterations:
 - Use L to train a classifier h_1 that considers only the x_1 portion of x
 - Use L to train a classifier h_2 that considers only the x_2 portion of x
