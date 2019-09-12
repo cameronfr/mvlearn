@@ -2,8 +2,6 @@
 ### Chang Xu, Dacheng Tao, Chao Xu
 link: https://arxiv.org/abs/1304.5634
 
-# Summary
-
 ## Introduction
 3 types of MV Learning Methods
 1. Co-training
