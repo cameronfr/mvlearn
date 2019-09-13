@@ -29,22 +29,20 @@ Process:
 - Repeat for T rounds:
 	* for j in {1,2}:
 		* for each x_u in U':
-			y_hat_u <- hj(x_u)
-			Omega <- Neighbors(x_u,k,Lj)
-			h'j <- kNN(Lj union {(x_u,y_hat_u)},k,pj)
-			Delta_x_u maximize formula
-		end
-		if there exists Delta_x_u > 0
-		then best x_j <- argmax(Delta_x_u); best y_j <- hj(best x_j)
-			pi_j <- {(best x_j, best y_j)}; U' <- U' - pi_j
-		else pi_j <- empty set
-	end
-	L1 <- L1 union pi_2; L2 <- L2 union pi_1
-	if neither L1 nor L2 changes, then exit
-	else
-		h1 <- kNN(L1,k,p1); h2 <- kNN(L2,k,p2)
-		Replenish U' by randomly picking examples from U
-  end
-Output: regressor h(x) <- 0.5(h1(x) + h2(x))
+			* y_hat_u <- hj(x_u)
+			* Omega <- Neighbors(x_u,k,Lj)
+			* h'j <- kNN(Lj union {(x_u,y_hat_u)},k,pj)
+			* Delta_x_u maximize formula
+		* if there exists Delta_x_u > 0, then best x_j <- argmax(Delta_x_u); best y_j <- hj(best x_j)
+			* pi_j <- {(best x_j, best y_j)}; U' <- U' - pi_j
+		* else 
+			* pi_j <- empty set
+	* L1 <- L1 union pi_2; L2 <- L2 union pi_1
+	* if neither L1 nor L2 changes, then exit
+	* else
+		* h1 <- kNN(L1,k,p1); h2 <- kNN(L2,k,p2)
+		* Replenish U' by randomly picking examples from U
+
+**Output:** regressor h(x) <- 0.5(h1(x) + h2(x))
 
 **Overall** Co-regression can improve regression over other methods, such as *Self* and *ARTRE*. 
