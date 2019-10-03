@@ -129,3 +129,10 @@ talk.religion.misc.txt
 # figures generated in ipynb
 Image*.png
 Error*.png
+*pair.png
+
+# paper summaries
+**PaperSummaries/*survey*.md
+**PaperSummaries/*Survey*.md
+
+CoTraining/Testing/20-newsgroups/*.csv
