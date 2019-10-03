@@ -130,6 +130,7 @@ talk.religion.misc.txt
 Image*.png
 Error*.png
 *pair.png
+Multiview*.png
 
 # paper summaries
 **/PaperSummaries/*survey*.md
