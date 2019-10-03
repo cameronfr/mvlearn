@@ -132,7 +132,11 @@ Error*.png
 *pair.png
 
 # paper summaries
-**PaperSummaries/*survey*.md
-**PaperSummaries/*Survey*.md
+**/PaperSummaries/*survey*.md
+**/PaperSummaries/*Survey*.md
 
-CoTraining/Testing/20-newsgroups/*.csv
+**/CoTraining/Testing/20-newsgroups*
+**/CoTraining/Testing/Diabetes*
+**/CoTraining/Testing/Co-Training_Arman*
+
+**/MindBrainBody/*
