@@ -167,7 +167,7 @@ class CTClassifier(object):
         assert(self.p_ > 0 and self.n_ > 0 and self.k_ > 0 and self.u_ > 0)
 
         #the set of unlabeled samples
-        U = [i for i, y_i in enumerate(y) if y_i == -1]
+        U = [i for i, y_i in enumerate(y) if np.isnan(y_i)]
 
         #we randomize here, and then just take from the back so we don't have to sample every time
         np.random.seed(10)
@@ -177,11 +177,10 @@ class CTClassifier(object):
         U_ = U[-min(len(U), self.u_):]
 
         #the samples that are initially labeled
-        L = [i for i, y_i in enumerate(y) if y_i != -1]
+        L = [i for i, y_i in enumerate(y) if ~np.isnan(y_i)]
 
         #remove the samples in U_ from U
         U = U[:-len(U_)]
-
 
         it = 0 #number of cotraining iterations we've done so far
 
@@ -211,7 +210,7 @@ class CTClassifier(object):
             
             #print([np.sort(y1_prob)[:5]])
             for i in (y1_prob[:,0].argsort())[-self.n_:]:
-                #if y1_prob[i,0] > 0.5:
+                if y1_prob[i,0] > np.log(0.5):
                     n.append(i)
 #                     if y_test_new[i] == 0:
 #                         accurate_guesses_h1 += 1
@@ -222,7 +221,7 @@ class CTClassifier(object):
                  
             #print([(np.sort(y1_prob))[-5:]])
             for i in (y1_prob[:,1].argsort())[-self.p_:]:
-                #if y1_prob[i,1] > 0.5:
+                if y1_prob[i,1] > np.log(0.5):
                     p.append(i)
 #                     if y_test_new[i] == 1:
 #                         accurate_guesses_h1 += 1
@@ -233,7 +232,7 @@ class CTClassifier(object):
 
             #print([(np.sort(y2_prob))[:5]])
             for i in (y2_prob[:,0].argsort())[-self.n_:]:
-                #if y2_prob[i,0] > 0.5:
+                if y2_prob[i,0] > np.log(0.5):
                     n.append(i)
 #                     if y_test_new[i] == 0:
 #                         accurate_guesses_h2 += 1
@@ -244,7 +243,7 @@ class CTClassifier(object):
                     
             #print([(np.sort(y2_prob))[-5:]])
             for i in (y2_prob[:,1].argsort())[-self.p_:]:
-                #if y2_prob[i,1] > 0.5:
+                if y2_prob[i,1] > np.log(0.5):
                     p.append(i)
 #                     if y_test_new[i] == 1:
 #                         accurate_guesses_h2 += 1
@@ -253,12 +252,6 @@ class CTClassifier(object):
 #                         wrong_guesses_h2 += 1
 #                         print("h2 guessed 1 actually " + str(y_test_new[i]))
 
-
-                        
-#             print("accurate guesses h1 " + str(accurate_guesses_h1))
-#             print("wrong guesses h1" + str(wrong_guesses_h1))
-#             print("accurate guesses h2 " + str(accurate_guesses_h2))
-#             print("wrong guesses h2" + str(wrong_guesses_h2))
             
 
             #label the samples and remove the newly added samples from U_
@@ -307,20 +300,30 @@ class CTClassifier(object):
     
     def predict(self, X1, X2):
         """
-        Predict the classes of the samples represented by the features in X1 and X2.
+        Predict the classes of the examples in the two input views.
 
-        Parameters:
-        X1 - array-like (n_samples, n_features1)
-        X2 - array-like (n_samples, n_features2)
+        Parameters
+        ----------
+        Xs : list of numpy arrays (each with the same first dimension)
+            The list should be length 2 (since only 2 view data is currently
+            supported for co-training). View 1 (X1) is the first element in 
+            the list and should have shape (n_samples, n1_features). View 2 (X2)
+            is the second element in the list and should have shape (n-samples,
+            n2_features)
 
         
-        Output:
-        y - array-like (n_samples)
-            These are the predicted classes of each of the samples.  If the two classifiers, don't agree, we try
-            to use predict_proba and take the classifier with the highest confidence and if predict_proba is not implemented, then we randomly
-            assign either 0 or 1.  We hope to improve this in future releases.
+        Returns
+        -------
+        y_pred : array-like (n_samples,)
+            The predicted class of each input example. If the two classifiers
+            don't agree, pick the one with the highest predicted probability
+            from predict_proba()
 
         """
+        if len(Xs) != self.n_classes_:
+            raise ValueError("{0:s} must provide {1:d} classes; got classes"
+                             .format(self.class_name, self.n_classes_, 
+                                len(Xs)))
 
         y1 = self.clf1_.predict(X1)
         y2 = self.clf2_.predict(X2)
@@ -358,8 +361,34 @@ class CTClassifier(object):
 
 
     def predict_proba(self, X1, X2):
-        """Predict the probability of the samples belonging to each class."""
-        y_proba = np.full((X1.shape[0], 2), -1)
+        """
+        Predict the probability of each example belonging to a each class.
+
+        Parameters
+        ----------
+        Xs : list of numpy arrays (each with the same first dimension)
+            The list should be length 2 (since only 2 view data is currently
+            supported for co-training). View 1 (X1) is the first element in 
+            the list and should have shape (n_samples, n1_features). View 2 (X2)
+            is the second element in the list and should have shape (n-samples,
+            n2_features)
+
+        
+        Returns
+        -------
+        y_pred : array-like (n_samples, n_classes)
+            The predicted class of each input example. If the two classifiers
+            don't agree, pick the one with the highest predicted probability
+            from predict_proba().
+
+        """
+
+        if len(Xs) != self.n_classes_:
+            raise ValueError("{0:s} must provide {1:d} classes; got classes"
+                             .format(self.class_name, self.n_classes_, 
+                                len(Xs)))
+
+        y_proba = np.full((X1.shape[0], self.n_classes_), -1)
 
         y1_proba = self.clf1_.predict_proba(X1)
         y2_proba = self.clf2_.predict_proba(X2)
