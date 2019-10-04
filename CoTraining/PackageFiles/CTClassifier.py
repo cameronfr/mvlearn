@@ -26,6 +26,31 @@ class CTClassifier(object):
     Attributes
     ----------
     h1_ : classifier object 
+        The classifier used on view 1.
+
+    h2_ : classifier object
+        The classifier used on view 2.
+
+    classes_ : array-like of shape (n_classes,)
+        Unique class labels.
+
+    n_classes_ : int
+        Number of unique classes.
+
+    p_ : int
+        Number of positive examples (second label in classes_) to pull from 
+        unlabeled and give "label" at each training round.
+
+    n_ : int
+        Number of positive examples (second label in classes_) to pull from 
+        unlabeled and give "label" at each training round.
+
+    u_ : int
+        Size of pool of unlabeled examples to classify at each iteration.
+
+    num_iter_ : int
+        Maximum number of training iterations to run.
+
 
     References
     ----------
@@ -35,6 +60,9 @@ class CTClassifier(object):
         conference on Computational learning theory (pp. 92-100). ACM.
 
     """
+
+    #TODO Change the name of U_ to unlabeled, change k_ to num_iter_, change u_ to u_pool_size
+    # Change clf1 to h1, and clf2 to h2
     
     def __init__(self, h1, h2):
         
@@ -48,21 +76,22 @@ class CTClassifier(object):
         self.partial_error_ = []
         # for testing with training data
         self.partial_train_error_ = []
+        self.class_name = "CTClassifier"
 
+        return self
 
-    def fit(self, X1, X2, y, p=None, n=None, u=75, n_iter=50, y_train_full=None, X1_test=None, X2_test=None, y_test=None):
+    def fit(self, X1, X2, y, p=None, n=None, unlabeled_pool_size=75, num_iter=50, y_train_full=None, X1_test=None, X2_test=None, y_test=None):
         """
-        Fit the classifier object to the data provided by training on the
-        data given in Xs. 
+        Fit the classifier object to the data in Xs, y.
 
         Parameters
         ----------
         Xs : list of numpy arrays (each must have same first dimension)
             The list should be length 2 (since only 2 view data is currently
             supported for co-training). View 1 (X1) is the first element in 
-            the list and should have shape (n_samples, d1_features). View 2 (X2)
+            the list and should have shape (n_samples, n1_features). View 2 (X2)
             is the second element in the list and should have shape (n-samples,
-            d2_features)
+            n2_features)
 
         y : array-like of shape (n_samples,)
             The labels of the training data. Unlabeled examples should have
@@ -72,33 +101,42 @@ class CTClassifier(object):
             The number of positive classifications from the unlabeled 
             training set which will be given a positive "label". If None, the
             default is the floor of the ratio of positive to negative examples
-            in the labeled training data. If only one of p or n is not None,
-            the other will be set to be the same.
+            in the labeled training data (at least 1). If only one of p or n 
+            is not None, the other will be set to be the same.
 
         n : int, optional (default=None)
             The number of negative classifications from the unlabeled 
             training set which will be given a negative "label". If None, the
             default is the floor of the ratio of positive to negative examples
-            in the labeled training data. If only one of p or n is not None,
-            the other will be set to be the same.
+            in the labeled training data (at least 1). If only one of p or n 
+            is not None, the other will be set to be the same.
 
-        u : int, optional (default=75)
+        unlabeled_pool_size : int, optional (default=75)
             The number of unlabeled samples which will be kept in a separate pool
             for classification and selection by the updated classifier at each
             training iteration.
 
-        n_iter : int, optional (default=50)
+        num_iter : int, optional (default=50)
             The maximum number of training iterations to run.
 
-
-        fits the classifiers on the partially labeled data, y.
-
-        Parameters:
-        X1 - array-like (n_samples, n_features_1): first set of features for samples
-        X2 - array-like (n_samples, n_features_2): second set of features for samples
-        y - array-like (n_samples): labels for samples, -1 indicates unlabeled
-
         """
+
+        # convert to numpy array
+        y = np.asarray(y)
+
+        # if not exactly 2 classes, raise error
+        self.classes_ = set(y[~np.isnan(y)])
+        self.n_classes_ = len(self.classes_)
+        if self.n_classes_ > 2:
+            raise ValueError("{0:s} supports only binary classification. "
+                             "y contains {1:d} classes"
+                             .format(self.class_name, self.n_classes_))
+        if self.n_classes_ == 1:
+            raise ValueError("{0:s} requires 2 classes; got 1 class"
+                             .format(self.class_name))
+        if self.n_classes_ == 0:
+            raise ValueError("Insufficient labeled data")
+
 
         # If only 1 of p or n is not None, set them equal
         if (p is not None and n is None):
@@ -106,30 +144,23 @@ class CTClassifier(object):
         elif (p is None and n is not None):
             p = n    
         elif (p is None and n is None):
-
-
-        self.p_ = p
-        self.n_ = n
-        self.u_ = u
-        self.k_ = n_iter
-
-        # convert to numpy array
-        y = np.asarray(y)
-
-        #set the n and p parameters if we need to
-        if self.p_ == -1 and self.n_ == -1:
-            num_pos = sum(1 for y_i in y if y_i == 1)
-            num_neg = sum(1 for y_i in y if y_i == 0)
-
-            n_p_ratio = num_neg / float(num_pos)
-
-            if n_p_ratio > 1:
-                self.p_ = 1
-                self.n_ = round(self.p_*n_p_ratio)
-
-            else:
+            num_class_n = sum[1 for y_n in y if y_n == self.classes_[0]]
+            num_class_p = sum[1 for y_p in y if y_p == self.classes_[1]]
+            p_over_n_ratio = num_class_p // num_class_n
+            if p_over_n_ratio > 1:
+                self.p_ = p_over_n_ratio
                 self.n_ = 1
-                self.p_ = round(self.n_/n_p_ratio)
+            else:
+                self.n_ = num_class_n // num_class_p
+                self.p_ = 1
+        else:
+            self.p_ = p
+            self.n_ = n 
+
+
+        self.u_ = unlabeled_pool_size
+        self.k_ = num_iter
+
         print(self.n_)
         print(self.p_)
 
@@ -155,7 +186,7 @@ class CTClassifier(object):
         it = 0 #number of cotraining iterations we've done so far
 
         #loop until we have assigned labels to everything in U or we hit our iteration break condition
-        while it != self.k_ and U:
+        while it < self.k_ and U:
             it += 1
 
             
