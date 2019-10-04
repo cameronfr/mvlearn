@@ -1,0 +1,342 @@
+import numpy as np
+
+class CTClassifier(object):
+    """
+    Co-Training Classifier
+    
+    This class implements the co-training classifier similar to as described
+    in [1]. This should ideally be used on 2 views of the input data which 
+    satisfy the 3 conditions for multi-view co-training (sufficiency, 
+    compatibility, conditional independence) as detailed in [1].
+
+        
+    Parameters
+    ----------
+    h1 : classifier object
+        The classifier object which will be trained on view 1 of the data.
+        This classifier should support the predict_proba() function so that
+        classification probabilities can be computed and co-training can be
+        performed effectively.
+
+    h2 : classifier object
+        The classifier object which will be trained on view 2 of the data.
+        Does not need to be of the same type as h1, but should support
+        predict_proba().
+
+    Attributes
+    ----------
+    h1_ : classifier object 
+
+    References
+    ----------
+
+    [1] Blum, A., & Mitchell, T. (1998, July). Combining labeled and unlabeled
+        data with co-training. In Proceedings of the eleventh annual 
+        conference on Computational learning theory (pp. 92-100). ACM.
+
+    """
+    
+    def __init__(self, h1, h2):
+        
+        self.clf1_ = h1
+        self.clf2_ = h2
+
+
+        np.random.seed(10)
+        
+        # for testing
+        self.partial_error_ = []
+        # for testing with training data
+        self.partial_train_error_ = []
+
+
+    def fit(self, X1, X2, y, p=None, n=None, u=75, n_iter=50, y_train_full=None, X1_test=None, X2_test=None, y_test=None):
+        """
+        Fit the classifier object to the data provided by training on the
+        data given in Xs. 
+
+        Parameters
+        ----------
+        Xs : list of numpy arrays (each must have same first dimension)
+            The list should be length 2 (since only 2 view data is currently
+            supported for co-training). View 1 (X1) is the first element in 
+            the list and should have shape (n_samples, d1_features). View 2 (X2)
+            is the second element in the list and should have shape (n-samples,
+            d2_features)
+
+        y : array-like of shape (n_samples,)
+            The labels of the training data. Unlabeled examples should have
+            label np.nan.
+
+        p : int, optional (default=None)
+            The number of positive classifications from the unlabeled 
+            training set which will be given a positive "label". If None, the
+            default is the floor of the ratio of positive to negative examples
+            in the labeled training data. If only one of p or n is not None,
+            the other will be set to be the same.
+
+        n : int, optional (default=None)
+            The number of negative classifications from the unlabeled 
+            training set which will be given a negative "label". If None, the
+            default is the floor of the ratio of positive to negative examples
+            in the labeled training data. If only one of p or n is not None,
+            the other will be set to be the same.
+
+        u : int, optional (default=75)
+            The number of unlabeled samples which will be kept in a separate pool
+            for classification and selection by the updated classifier at each
+            training iteration.
+
+        n_iter : int, optional (default=50)
+            The maximum number of training iterations to run.
+
+
+        fits the classifiers on the partially labeled data, y.
+
+        Parameters:
+        X1 - array-like (n_samples, n_features_1): first set of features for samples
+        X2 - array-like (n_samples, n_features_2): second set of features for samples
+        y - array-like (n_samples): labels for samples, -1 indicates unlabeled
+
+        """
+
+        # If only 1 of p or n is not None, set them equal
+        if (p is not None and n is None):
+            n = p
+        elif (p is None and n is not None):
+            p = n    
+        elif (p is None and n is None):
+
+
+        self.p_ = p
+        self.n_ = n
+        self.u_ = u
+        self.k_ = n_iter
+
+        # convert to numpy array
+        y = np.asarray(y)
+
+        #set the n and p parameters if we need to
+        if self.p_ == -1 and self.n_ == -1:
+            num_pos = sum(1 for y_i in y if y_i == 1)
+            num_neg = sum(1 for y_i in y if y_i == 0)
+
+            n_p_ratio = num_neg / float(num_pos)
+
+            if n_p_ratio > 1:
+                self.p_ = 1
+                self.n_ = round(self.p_*n_p_ratio)
+
+            else:
+                self.n_ = 1
+                self.p_ = round(self.n_/n_p_ratio)
+        print(self.n_)
+        print(self.p_)
+
+        assert(self.p_ > 0 and self.n_ > 0 and self.k_ > 0 and self.u_ > 0)
+
+        #the set of unlabeled samples
+        U = [i for i, y_i in enumerate(y) if y_i == -1]
+
+        #we randomize here, and then just take from the back so we don't have to sample every time
+        np.random.seed(10)
+        np.random.shuffle(U)
+        
+        #this is U' in paper
+        U_ = U[-min(len(U), self.u_):]
+
+        #the samples that are initially labeled
+        L = [i for i, y_i in enumerate(y) if y_i != -1]
+
+        #remove the samples in U_ from U
+        U = U[:-len(U_)]
+
+
+        it = 0 #number of cotraining iterations we've done so far
+
+        #loop until we have assigned labels to everything in U or we hit our iteration break condition
+        while it != self.k_ and U:
+            it += 1
+
+            
+            self.clf1_.fit(X1[L], y[L])
+            self.clf2_.fit(X2[L], y[L])
+            print(len(L))
+            ###y_test_new = y_test[U_]
+
+            y1_prob = self.clf1_.predict_log_proba(X1[U_])
+            y2_prob = self.clf2_.predict_log_proba(X2[U_])
+            
+            
+#             print(y1_prob)
+#             print(y2_prob)
+            
+            n, p = [], []
+            accurate_guesses_h1 = 0
+            accurate_guesses_h2 = 0
+            wrong_guesses_h1 = 0
+            wrong_guesses_h2 = 0
+            
+            
+            #print([np.sort(y1_prob)[:5]])
+            for i in (y1_prob[:,0].argsort())[-self.n_:]:
+                #if y1_prob[i,0] > 0.5:
+                    n.append(i)
+#                     if y_test_new[i] == 0:
+#                         accurate_guesses_h1 += 1
+#                         print("h1 correct class 0")
+#                     else:
+#                         wrong_guesses_h1 += 1
+#                         print("h1 guessed 0 actually " + str(y_test_new[i]))
+                 
+            #print([(np.sort(y1_prob))[-5:]])
+            for i in (y1_prob[:,1].argsort())[-self.p_:]:
+                #if y1_prob[i,1] > 0.5:
+                    p.append(i)
+#                     if y_test_new[i] == 1:
+#                         accurate_guesses_h1 += 1
+#                         print("h1 correct class 1")
+#                     else:
+#                         wrong_guesses_h1 += 1
+#                         print("h1 guessed 1 actually " + str(y_test_new[i]))
+
+            #print([(np.sort(y2_prob))[:5]])
+            for i in (y2_prob[:,0].argsort())[-self.n_:]:
+                #if y2_prob[i,0] > 0.5:
+                    n.append(i)
+#                     if y_test_new[i] == 0:
+#                         accurate_guesses_h2 += 1
+#                         print("h2 correct class 0")
+#                     else:
+#                         wrong_guesses_h2 += 1
+#                         print("h2 guessed 0 actually " + str(y_test_new[i]))
+                    
+            #print([(np.sort(y2_prob))[-5:]])
+            for i in (y2_prob[:,1].argsort())[-self.p_:]:
+                #if y2_prob[i,1] > 0.5:
+                    p.append(i)
+#                     if y_test_new[i] == 1:
+#                         accurate_guesses_h2 += 1
+#                         print("h2 correct class 1")
+#                     else:
+#                         wrong_guesses_h2 += 1
+#                         print("h2 guessed 1 actually " + str(y_test_new[i]))
+
+
+                        
+#             print("accurate guesses h1 " + str(accurate_guesses_h1))
+#             print("wrong guesses h1" + str(wrong_guesses_h1))
+#             print("accurate guesses h2 " + str(accurate_guesses_h2))
+#             print("wrong guesses h2" + str(wrong_guesses_h2))
+            
+
+            #label the samples and remove the newly added samples from U_
+            y[[U_[x] for x in p]] = 1
+            y[[U_[x] for x in n]] = 0
+
+            L.extend([U_[x] for x in p])
+            L.extend([U_[x] for x in n])
+
+            U_ = [elem for elem in U_ if not (elem in p or elem in n)]
+
+            #add new elements to U_
+            add_counter = 0 #number we have added from U to U_
+            num_to_add = len(p) + len(n)
+            while add_counter != num_to_add and U:
+                add_counter += 1
+                U_.append(U.pop())
+                
+            
+            # if input testing data as well, find the incrememtal update on accuracy
+            if X1_test is not None and X2_test is not None and y_test is not None:
+                y_pred = self.predict(X1_test, X2_test)
+                self.partial_error_.append(1-accuracy_score(y_test, y_pred))
+                y_pred = self.predict(X1, X2)
+                self.partial_train_error_.append(1-accuracy_score(y_train_full, y_pred))
+
+
+            #TODO: Handle the case where the classifiers fail to agree on any of the samples (i.e. both n and p are empty)
+
+
+        #fit the final model
+        self.clf1_.fit(X1[L], y[L])
+        self.clf2_.fit(X2[L], y[L])
+        
+        return (self.partial_train_error_, self.partial_error_)
+
+
+    #TODO: Move this outside of the class into a util file.
+    def supports_proba(self, clf, x):
+        """Checks if a given classifier supports the 'predict_proba' method, given a single vector x"""
+        try:
+            clf.predict_proba([x])
+            return True
+        except:
+            return False
+    
+    def predict(self, X1, X2):
+        """
+        Predict the classes of the samples represented by the features in X1 and X2.
+
+        Parameters:
+        X1 - array-like (n_samples, n_features1)
+        X2 - array-like (n_samples, n_features2)
+
+        
+        Output:
+        y - array-like (n_samples)
+            These are the predicted classes of each of the samples.  If the two classifiers, don't agree, we try
+            to use predict_proba and take the classifier with the highest confidence and if predict_proba is not implemented, then we randomly
+            assign either 0 or 1.  We hope to improve this in future releases.
+
+        """
+
+        y1 = self.clf1_.predict(X1)
+        y2 = self.clf2_.predict(X2)
+
+        proba_supported = self.supports_proba(self.clf1_, X1[0]) and self.supports_proba(self.clf2_, X2[0])
+
+        #fill y_pred with -1 so we can identify the samples in which the classifiers failed to agree
+        y_pred = np.asarray([-1] * X1.shape[0])
+        num_disagree = 0
+        num_agree = 0
+
+        for i, (y1_i, y2_i) in enumerate(zip(y1, y2)):
+            if y1_i == y2_i:
+                y_pred[i] = y1_i
+                num_agree += 1
+            elif proba_supported:
+                y1_probs = self.clf1_.predict_proba([X1[i]])[0]
+                y2_probs = self.clf2_.predict_proba([X2[i]])[0]
+                sum_y_probs = [prob1 + prob2 for (prob1, prob2) in zip(y1_probs, y2_probs)]
+                max_sum_prob = max(sum_y_probs)
+                y_pred[i] = sum_y_probs.index(max_sum_prob)
+                num_disagree += 1
+            else:
+                #the classifiers disagree and don't support probability, so we guess
+                y_pred[i] = random.randint(0, 1)
+                
+        print("agree: " + str(num_agree))
+        print("disagree: " + str(num_disagree))
+
+
+        #check that we did everything right
+        assert not (-1 in y_pred)
+
+        return y_pred
+
+
+    def predict_proba(self, X1, X2):
+        """Predict the probability of the samples belonging to each class."""
+        y_proba = np.full((X1.shape[0], 2), -1)
+
+        y1_proba = self.clf1_.predict_proba(X1)
+        y2_proba = self.clf2_.predict_proba(X2)
+
+        for i, (y1_i_dist, y2_i_dist) in enumerate(zip(y1_proba, y2_proba)):
+            y_proba[i][0] = (y1_i_dist[0] + y2_i_dist[0]) / 2
+            y_proba[i][1] = (y1_i_dist[1] + y2_i_dist[1]) / 2
+
+        _epsilon = 0.0001
+        assert all(abs(sum(y_dist) - 1) <= _epsilon for y_dist in y_proba)
+        return y_proba
