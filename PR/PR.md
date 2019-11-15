@@ -7,7 +7,7 @@
 
 2. All directories should have an empty `__init__.py` script
 
-3. All functions should have comments following napoleon formatting (https://sphinxcontrib-napoleon.readthedocs.io/en/latest/). See `multiview/example` for the correct format.
+3. All functions in `multiview` should have comments following napoleon formatting (https://sphinxcontrib-napoleon.readthedocs.io/en/latest/). See `multiview/example` for the correct format.
 
 4. Unit tests for code should be written in the tests/ folder in the root directory using pytest (https://docs.pytest.org/en/latest/contents.html). Unit tests should be thorough (all main and helper functions should have tests).
 
