@@ -47,7 +47,7 @@ class NoisyMnist(Dataset):
         image2 = np.clip(image2 + np.random.uniform(0, 1, size=image2.shape), 0, 1)
 
         image1 = (image1 - self.MNIST_MEAN) / self.MNIST_STD
-        image2 = (image2 - self.MNIST_MEAN) / self.MNIST_STD
+        image2 = (image2 - (self.MNIST_MEAN+0.5-0.053)) / self.MNIST_STD
 
         image1 = torch.FloatTensor(image1).unsqueeze(0)
         image2 = torch.FloatTensor(image2).unsqueeze(0)
@@ -60,7 +60,7 @@ class SimpleEncoder(torch.nn.Module):
         self.layer1 = torch.nn.Linear(784, 1024)
         self.layer2 = torch.nn.Linear(1024, 1024)
         self.layer3 = torch.nn.Linear(1024, 1024)
-        self.layer4 = torch.nn.Linear(1024, 20)
+        self.layer4 = torch.nn.Linear(1024, 10)
 
     def forward(self, x):
         x = x.view(-1, 784)
@@ -73,7 +73,7 @@ class SimpleEncoder(torch.nn.Module):
 class SimpleDecoder(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.layer1 = torch.nn.Linear(20, 1024)
+        self.layer1 = torch.nn.Linear(10, 1024)
         self.layer2 = torch.nn.Linear(1024, 1024)
         self.layer3 = torch.nn.Linear(1024, 1024)
         self.layer4 = torch.nn.Linear(1024, 784)
@@ -91,7 +91,7 @@ class SimpleDecoder(torch.nn.Module):
 # their SplitAE (768-> 1024, 1024-> 1024, 1024->1024, 1024 -> L), L = 5 or 10 or 15 or 20 or 50, paper ambig.
 # should replicate graph and then compare to convolutional version with same amt of parameters.
 dataset = NoisyMnist(train=True)
-dataloader = DataLoader(dataset, batch_size=128, shuffle=True, num_workers=8)
+dataloader = DataLoader(dataset, batch_size=800, shuffle=True, num_workers=8)
 testDataset = NoisyMnist(train=False)
 testDataloader = DataLoader(testDataset, batch_size=128, shuffle=True, num_workers=8)
 
@@ -110,7 +110,7 @@ view2Decoder = SimpleDecoder().to(device)
 print("Encoder param count ", np.sum([np.prod(s.shape) for s in encoder.parameters()]))
 
 parameters = [encoder.parameters(), view1Decoder.parameters(), view2Decoder.parameters()]
-optim = torch.optim.Adam(itertools.chain(*parameters), lr=0.0001)
+optim = torch.optim.Adam(itertools.chain(*parameters), lr=0.001)
 
 errors = []
 testErrors = []
@@ -204,6 +204,42 @@ np.var(data[0], ddof=0)
 # Implement DCCAE
 
 
+# forward and backwards pass given by
+# https://ttic.uchicago.edu/~klivescu/papers/andrew_icml2013.pdf
+class CCALoss(torch.autograd.Function):
+
+    # X and Y must be centered input
+    @staticmethod
+    def forward(ctx, X, Y, regularizationλ=0):
+        X = X - X.mean(axis=0)
+        Y = Y - Y.mean(axis=0)
+        covXX = (X.t() @ X) / X.shape[0] + regularizationλ*torch.eye(X.shape[1], device=X.device)
+        covYY = (Y.t() @ Y) / X.shape[0] + regularizationλ*torch.eye(Y.shape[1], device=X.device)
+        covXY = (X.t() @ Y) / X.shape[0]
+        U_x, S_x, V_x = covXX.svd()
+        U_y, S_y, V_y = covYY.svd()
+        covXXinvHalf = V_x @ (S_x.sqrt().reciprocal().diag()) @ U_x.t()
+        covYYinvHalf = V_y @ (S_y.sqrt().reciprocal().diag()) @ U_y.t()
+        T = covXXinvHalf @ covXY @ covYYinvHalf
+        U, S, V = T.svd()
+        ctx.save_for_backward(X, Y, covXXinvHalf, covYYinvHalf, U, S, V)
+        return -torch.mean(S)
+
+    @staticmethod
+    def backward(ctx, gradWrttoOutput):
+        X, Y, covXXinvHalf, covYYinvHalf, U, S, V = ctx.saved_tensors
+        grad12 = covXXinvHalf @ U @ V.t() @ covYYinvHalf
+        grad11 = -0.5 * covXXinvHalf @ U @ S.diag() @ U.t() @ covXXinvHalf
+        grad22 = -0.5 * covYYinvHalf @ V @ S.diag() @ V.t() @ covYYinvHalf
+
+        gradWrttoX = ((1/X.shape[1])**2) * (2*X@grad11 + Y@grad12.t())
+        gradWrttoY = ((1/X.shape[1])**2) * (X@grad12 + 2*Y@grad22)
+        gradWrttoInput = (-gradWrttoOutput * gradWrttoX, -gradWrttoOutput * gradWrttoY, None)
+
+        return gradWrttoInput
+
+# Jovo: positive and negative controls
+
 # Below is CCA formula given by
 # http://numerical.recipes/whp/notes/CanonCorrBySVD.pdf
 # https://github.com/moskomule/cca.pytorch/blob/master/cca/cca.py
@@ -226,19 +262,19 @@ def cca_svd(Xin, Yin):
 # Below is CCA formula given by
 # https://ttic.uchicago.edu/~klivescu/papers/andrew_icml2013.pdf
 # Gives opportunity to prevent backprop failure (via adding identity) when input singular.
-def cca(Xin, Yin, regularizationλ=0):
+def cca(X, Y, regularizationλ=0):
     # Xin = view1Latent.detach()
     # Yin = view2Latent.detach()
     # Xin.requires_grad = True
     # Yin.requires_grad = True
     # regularizationλ = 0.5
 
-    X = Xin - torch.mean(Xin, axis=0)
-    Y = Yin - torch.mean(Yin, axis=0)
-    k = min(Xin.shape[1], Yin.shape[1])
-    covXX = (X.t() @ X) + regularizationλ*torch.eye(X.shape[1], device=X.device)
-    covYY = (Y.t() @ Y) + regularizationλ*torch.eye(Y.shape[1], device=X.device)
-    covXY = (X.t() @ Y)
+    X = X - X.mean(axis=0)
+    Y = Y - Y.mean(axis=0)
+    k = min(X.shape[1], Y.shape[1])
+    covXX = (X.t() @ X) / X.shape[0] + regularizationλ*torch.eye(X.shape[1], device=X.device)
+    covYY = (Y.t() @ Y) / X.shape[0] + regularizationλ*torch.eye(Y.shape[1], device=X.device)
+    covXY = (X.t() @ Y) / X.shape[0]
 
     U_x, S_x, V_x = covXX.svd()
     U_y, S_y, V_y = covYY.svd()
@@ -262,8 +298,8 @@ def testCCA():
     Y = torch.FloatTensor(np.random.randn(1000,200)) + 20
 
     ccaResult = cca(X, Y)
-    Xcomponents = (X - X.mean()) @ ccaResult[0].t()
-    Ycomponents = (Y - Y.mean()) @ ccaResult[1].t()
+    Xcomponents = X @ ccaResult[0].t()
+    Ycomponents = Y @ ccaResult[1].t()
     canonicalCorrelations = ccaResult[2]
 
     # significantly worse, on 10,000samples x 1000 variables randn on mbp, after 2min hits "max iter error", vs 1.44s for above func.
@@ -272,7 +308,7 @@ def testCCA():
     sklearnYcomponents = torch.FloatTensor(sklearnCCAComponents[1])
 
     def correlation(xVec, yVec):
-        covariance = torch.mean((xVec - xVec.mean()) * (yVec - yVec.mean()))
+        covariance = torch.mean((xVec - xVec.mean(axis=0)) * (yVec - yVec.mean(axis=0)))
         stdprod = (torch.std(xVec, unbiased=False) * torch.std(yVec, unbiased=False))
         corr = covariance / stdprod
         return corr
@@ -291,8 +327,8 @@ def testCCA():
 
     # make sure uncorrelated canonical variables when i \neq j
     # also tensorized version of the withinAlgoDiff check
-    covariances = ((Xcomponents.t() - Xcomponents.mean()) @ (Ycomponents.t().t() - Ycomponents.mean())) / Xcomponents.t().shape[1]
-    stdProducts = torch.std(Ycomponents.t(), dim=1).view(1, -1) * torch.std(Xcomponents.t(), dim=1).view(-1, 1)
+    covariances = ((Xcomponents - Xcomponents.mean(axis=0)).t() @ (Ycomponents - Ycomponents.mean(axis=0))) / Xcomponents.t().shape[1]
+    stdProducts = torch.std(Ycomponents, dim=0).view(1, -1) * torch.std(Xcomponents, dim=0).view(-1, 1)
     correlations = covariances / stdProducts
     assert torch.all(correlations.diagonal() - canonicalCorrelations < 5e-2)
     assert torch.all(correlations - correlations.diagonal().diag() < 5e-2)
@@ -313,14 +349,16 @@ testCCA() # svd not working on V100 machine for pytorch >1.1 (1.1 works). Mb nee
 # Other SVD cca reaches NaN gradient with LR 0.001.
 # When set regularization parameter higher (e.g. 0.5 instead of 0.0001), it takes longer before a NaN gradient is reached.
 # Should implement manually derived gradients of DCCA and see if that helps.
+#  Implemented manual gradient, it's training but the end latents are not as separated as paper figure.
+# in their code, use batch size 800(!) (they mentioned that they had to use large batch size, claiming better covariance estimation)
+# and latent size 10. And lambda 0.01. (CCA gradient needs to be div by N again)
 
 view1Encoder = SimpleEncoder().to(device)
 view2Encoder = SimpleEncoder().to(device)
-
 view1Decoder = SimpleDecoder().to(device)
 view2Decoder = SimpleDecoder().to(device)
 
-# savedStates = torch.load("batch24000bs128_DCCAE_MNIST.pytorch")
+# savedStates = torch.load("batch27000bs128_DCCAE_MNIST_MoreReg.pytorch")
 # view1Encoder.load_state_dict(savedStates[0])
 # view2Encoder.load_state_dict(savedStates[1])
 # view1Decoder.load_state_dict(savedStates[2])
@@ -329,11 +367,14 @@ view2Decoder = SimpleDecoder().to(device)
 print("Encoder param count ", np.sum([np.prod(s.shape) for s in view1Encoder.parameters()]))
 
 parameters = [view1Encoder.parameters(), view2Encoder.parameters(), view1Decoder.parameters(), view2Decoder.parameters()]
-optim = torch.optim.Adam(itertools.chain(*parameters), lr=0.001)
+# optim = torch.optim.Adam(itertools.chain(*parameters), lr=0.001)
+optim = torch.optim.SGD(itertools.chain(*parameters), lr=0.001, momentum=0.99)
 
 errors = []
+ccaErrors = []
+reconstructionErrors = []
 testErrors = []
-for epoch in range(20):
+for epoch in range(50):
     for idx, (view1, view2, label) in enumerate(dataloader):
         optim.zero_grad()
 
@@ -343,14 +384,14 @@ for epoch in range(20):
         #     print(torch.sum(torch.isnan(view2Latent)))
         view1Decode = view1Decoder(view1Latent)
         view2Decode = view2Decoder(view2Latent)
-        plt.imshow(view2[1].squeeze().numpy())
-        plt.imshow(view2Decode[1].cpu().detach().squeeze().numpy())
+        # plt.imshow(view1[14].squeeze().numpy())
+        # plt.imshow(view1Decode[14].cpu().detach().squeeze().numpy())
 
         view1Error = torch.nn.MSELoss()(view1Decode, view1.to(device))
         view2Error = torch.nn.MSELoss()(view2Decode, view2.to(device))
-        corrEnergy = ccaEnergy(view1Latent, view2Latent, regularizationλ=10)
+        ccaLoss = CCALoss.apply(view1Latent, view2Latent, 1e-4)
         reconstructionError = view1Error + view2Error
-        totalError = reconstructionError - corrEnergy
+        totalError = 0.1*reconstructionError + ccaLoss
         totalError.backward()
         if sum([torch.sum(torch.isnan(p.grad)) for p in view2Encoder.parameters()]) > 0:
             raise Exception("Gradient nan")
@@ -360,14 +401,19 @@ for epoch in range(20):
             optim.step()
 
         errors.append(totalError.item())
+        ccaErrors.append(ccaLoss.item())
+        reconstructionErrors.append(reconstructionError.item())
         # testErrors.append(testError())
         if (idx % 300 == 0):
             print(testError())
-            plt.plot(errors)
+            plt.plot(errors, label="Total Error")
+            plt.plot(ccaErrors, label="CCA Error")
+            # plt.plot(reconstructionErrors, label="Reconstruction Error")
             # plt.plot(testErrors)
+            plt.legend()
             plt.show()
             # plotly()
-
+testError()
 # torch.save([view1Encoder.state_dict(), view2Encoder.state_dict(), view1Decoder.state_dict(), view2Decoder.state_dict()], "")
 
 
@@ -389,9 +435,9 @@ def testError():
 
         view1Error = torch.nn.MSELoss()(view1Decode, view1.to(device))
         view2Error = torch.nn.MSELoss()(view2Decode, view2.to(device))
-        corrEnergy = ccaEnergy(view1Latent, view2Latent, regularizationλ=0.5)
+        ccaLoss = CCALoss.apply(view1Latent, view2Latent, 1e-4)
         reconstructionError = view1Error + view2Error
-        totalError = reconstructionError - corrEnergy
+        totalError = 0.1 * reconstructionError + ccaLoss
 
         totalError = totalError.item()
     return totalError
@@ -404,8 +450,8 @@ testDataset = NoisyMnist(train=False)
 testDataloader = DataLoader(testDataset, batch_size=10000, shuffle=True, num_workers=8)
 with torch.no_grad():
     view1, view2, labels = next(iter(testDataloader))
-    latents = view1Encoder(view1.to(device))
-latents.shape
+    latentsView1 = view1Encoder(view1.to(device))
+    latentsView2 = view2Encoder(view2.to(device))
 
 pointColors = []
 colors = ['#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe']
@@ -414,14 +460,19 @@ origColors = (np.array(origColors)) / 255
 for l in labels.cpu().numpy():
     pointColors.append(tuple(origColors[l].tolist()))
 
+view1LatentsCCAComponents = latentsView1 @ cca(latentsView1, latentsView2, 1e-4)[0].t()
+
 tsne = TSNE(n_jobs=12)
-tsneEmbeddings = tsne.fit_transform(latents.cpu().numpy())
+tsneEmbeddingsRawLatents = tsne.fit_transform(latentsView1.cpu().numpy())
+tsneEmbeddingsCCAComponents = tsne.fit_transform(view1LatentsCCAComponents.cpu().numpy())
 # tsneEmbeddingsNoEncode = tsne.fit_transform(view1.view(-1, 784).numpy())
 # tsneEmbeddingsNoEncodeNoisy = tsne.fit_transform(view2.view(-1, 784).numpy())
 plt.xlabel("t-sne component 1")
 plt.ylabel("t-sne component 2")
 plt.title("DCCAE Noisy MNIST Embedding")
-plt.scatter(*tsneEmbeddings.transpose(), c=pointColors, s=5)
+plt.scatter(*tsneEmbeddingsRawLatents.transpose(), c=pointColors, s=5)
+plt.scatter(*tsneEmbeddingsCCAComponents.transpose(), c=pointColors, s=5)
+view2Latent
 plotly()
 # plt.scatter(*tsneEmbeddingsNoEncode.transpose(), c=pointColors, s=5)
 # plt.scatter(*tsneEmbeddingsNoEncodeNoisy.transpose(), c=pointColors, s=5)
