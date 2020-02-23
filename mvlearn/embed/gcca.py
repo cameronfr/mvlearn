@@ -24,10 +24,12 @@ from mvlearn.embed.utils import select_dimension
 
 class GCCA(BaseEmbed):
     """
-    An implementation of Generalized Canonical Correalation Analysis. Computes
-    individual projections into a common subspace such that the correlations
-    between pairwise projections are minimized (ie. maximize pairwise
-    correlation). Reduces to CCA in the two sample case.
+    An implementation of Generalized Canonical Correalation Analysis suitable
+    for cases where the number of features exceeds the number of samples by
+    first applying single view dimensionality reduction. Computes individual 
+    projections into a common subspace such that the correlations between 
+    pairwise projections are minimized (ie. maximize pairwise correlation). 
+    
 
     Parameters
     ----------
@@ -60,6 +62,15 @@ class GCCA(BaseEmbed):
     ranks_ : list of ints
         number of left singular vectors kept for each view during the first
         SVD
+
+    Notes
+    -----
+    Consider two views :math:`X_1` and :math:`X_2`. Canonical Correlation Analysis seeks to find vectors :math:`a_1` and :math:`a_2` to maximize the correlation :math:`X_1 a_1` and :math:`X_2 a_2`, expanded below.
+
+    .. math::
+        \big(\frac{a_1^TC_{12}a_2}{\sqrt{a_1^TC_{11}a_1a_2^TC_{22}a_2}} \big)
+
+    where :math:`C_{11}`, :math:`C_{22}`, and :math:`C_{12}` are respectively the view 1, view 2, and between view covariance matrix estimates. GCCA maximizes the sum of these correlations across all pairwise views and computes a set of linearly independent components. This specific algorithm first applies priciple component analysis and then aligns the most informative projections.
 
     References
     ----------
